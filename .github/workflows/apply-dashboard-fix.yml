@@ -1,0 +1,100 @@
+name: Apply dashboard fix
+
+on:
+  push:
+    branches:
+      - dashboard-public-safe
+    paths:
+      - .github/workflows/apply-dashboard-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply geometry and timezone fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('eclipse_2027_dashboard_v15.html')
+          text = path.read_text(encoding='utf-8')
+
+          old_geometry = '''  const maxSeparation=2.06;
+  const signedSeparation=-maxSeparation + pathProgress*(2*maxSeparation);
+  const separation=Math.abs(signedSeparation);'''
+          new_geometry = '''  const totalityEdge=Math.abs(Rm-Rs);
+  const totalityDuration=Math.max(c.third-c.second,0.001);
+  const apparentSpeed=(2*totalityEdge)/totalityDuration;
+  const maxSeparation=totalityEdge+(c.second-c.first)*apparentSpeed;
+  const signedSeparation=-maxSeparation + pathProgress*(2*maxSeparation);
+  const separation=Math.abs(signedSeparation);'''
+
+          if old_geometry in text:
+              text = text.replace(old_geometry, new_geometry, 1)
+          elif 'const apparentSpeed=(2*totalityEdge)/totalityDuration;' not in text:
+              raise SystemExit('Expected eclipse geometry block not found')
+
+          old_handler = '''onchange="timeZoneMode=this.value;renderSim()"'''
+          new_handler = '''onchange="timeZoneMode=this.value;document.getElementById('timeZoneLabel').textContent=timeZoneLabel();renderSim()"'''
+          if old_handler in text:
+              text = text.replace(old_handler, new_handler, 1)
+
+          option_marker = '''        <option value="local">Locale dispositivo</option>
+      </select>'''
+          option_replacement = '''        <option value="local">Locale dispositivo</option>
+      </select>
+      <span id="timeZoneLabel" class="badge good">Italia / Spagna</span>'''
+          if 'id="timeZoneLabel"' not in text:
+              if option_marker not in text:
+                  raise SystemExit('Timezone option block not found')
+              text = text.replace(option_marker, option_replacement, 1)
+
+          required = [
+              'const totalityEdge=Math.abs(Rm-Rs);',
+              'const apparentSpeed=(2*totalityEdge)/totalityDuration;',
+              'id="timeZoneMode"',
+              'id="timeZoneLabel"',
+              'value="utc"',
+              'value="local"',
+              'const partialDuration=68/60;'
+          ]
+          for item in required:
+              if item not in text:
+                  raise SystemExit('Missing expected implementation: ' + item)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate JavaScript
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path('eclipse_2027_dashboard_v15.html').read_text(encoding='utf-8')
+          scripts = re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>', html, re.S | re.I)
+          Path('/tmp/dashboard-inline.js').write_text('\n'.join(scripts), encoding='utf-8')
+          print('Dashboard patch validation passed')
+          PY
+          node --check /tmp/dashboard-inline.js
+
+      - name: Commit dashboard changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add eclipse_2027_dashboard_v15.html
+          if git diff --cached --quiet; then
+            echo 'No dashboard changes required'
+          else
+            git commit -m 'Fix eclipse geometry and timezone label'
+            git push
+          fi

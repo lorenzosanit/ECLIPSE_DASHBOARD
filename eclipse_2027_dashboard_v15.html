@@ -149,6 +149,14 @@ footer{max-width:1450px;margin:auto;padding:0 22px 40px;color:var(--muted);font-
   <h2>Simulatore: la serata in ogni località</h2>
   <p class="muted">Il simulatore usa un unico moto apparente continuo della Luna: velocità costante sulla timeline, disco lunare leggermente più grande del Sole e copertura calcolata dalla sovrapposizione dei due dischi.</p>
   <div class="toolbar">
+    <label class="time-zone-control" style="display:flex;align-items:center;gap:8px">
+      <span class="muted">Orari:</span>
+      <select id="timeZoneMode" aria-label="Fuso orario degli orari dell'eclissi" onchange="timeZoneMode=this.value;renderSim()">
+        <option value="madrid">Italia / Spagna</option>
+        <option value="utc">UTC</option>
+        <option value="local">Locale dispositivo</option>
+      </select>
+    </label>
     <select id="simPoint" onchange="setSelectedLocation(this.value,'simulator')"></select>
     <button onclick="playSim()">Avvia simulazione</button>
     <button onclick="pauseSim()">Pausa</button>
@@ -387,10 +395,47 @@ function distanceToBase(p){
  const q=Math.sin(dlat/2)**2+Math.cos(b.lat*a)*Math.cos(p.lat*a)*Math.sin(dlon/2)**2;
  return 2*R*Math.asin(Math.sqrt(q));
 }
+let timeZoneMode="madrid";
 function clock(mins){
-  let h=Math.floor(mins), m=Math.floor((mins-h)*60), s=Math.floor((((mins-h)*60)-m)*60);
-  if(s>=60){s=0;m++} if(m>=60){m=0;h++}
-  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  const totalSeconds=Math.round(mins*60);
+  const baseHours=Math.floor(totalSeconds/3600);
+  const baseMinutes=Math.floor((totalSeconds%3600)/60);
+  const baseSeconds=totalSeconds%60;
+  const baseDate=Date.UTC(2027,7,2,baseHours,baseMinutes,baseSeconds);
+
+  const partsFor=(date,timeZone)=>{
+    const parts=new Intl.DateTimeFormat("en-CA",{
+      timeZone,
+      year:"numeric",month:"2-digit",day:"2-digit",
+      hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"
+    }).formatToParts(date);
+    const out={};
+    for(const p of parts) out[p.type]=p.value;
+    return out;
+  };
+
+  const madridParts=partsFor(new Date(baseDate),"Europe/Madrid");
+  const targetWall=Date.UTC(2027,7,2,baseHours,baseMinutes,baseSeconds);
+  const madridWall=Date.UTC(
+    Number(madridParts.year),Number(madridParts.month)-1,Number(madridParts.day),
+    Number(madridParts.hour),Number(madridParts.minute),Number(madridParts.second)
+  );
+  const instant=new Date(baseDate+(targetWall-madridWall));
+
+  let zone="Europe/Madrid";
+  if(timeZoneMode==="utc") zone="UTC";
+  if(timeZoneMode==="local") zone=undefined;
+
+  const shown=partsFor(instant,zone);
+  return String(shown.hour).padStart(2,"0")+":"+
+    String(shown.minute).padStart(2,"0")+":"+
+    String(shown.second).padStart(2,"0");
+}
+
+function timeZoneLabel(){
+  if(timeZoneMode==="utc") return "UTC";
+  if(timeZoneMode==="local") return "Locale dispositivo";
+  return "Italia / Spagna";
 }
 function circleOverlapFraction(Rs,Rm,d){
   if(d >= Rs+Rm) return 0;
